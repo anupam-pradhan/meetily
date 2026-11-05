@@ -4,6 +4,8 @@
 //! and the provider/model the user already picked in Settings, so no new
 //! configuration is needed.
 
+mod prompts;
+
 use crate::database::repositories::setting::SettingsRepository;
 use crate::state::AppState;
 use crate::summary::llm_client::{generate_summary, LLMProvider};
@@ -12,6 +14,10 @@ use tauri::{AppHandle, Manager, Runtime};
 
 /// Keep prompts small and fast: only the tail of the transcript is sent.
 const MAX_CONTEXT_CHARS: usize = 6000;
+/// Bigger window for on-demand answers and summaries.
+const MAX_COPILOT_CHARS: usize = 24000;
+/// The copied prompts carry all instructions in the user message.
+const COPILOT_SYSTEM: &str = "Follow the instructions in the user message exactly.";
 
 const SYSTEM_PROMPT: &str = "You are a discreet real-time call copilot. \
 You read the latest part of a live call transcript and help the user respond well. \
@@ -62,22 +68,13 @@ fn parse_reply(content: &str) -> LiveSuggestions {
     }
 }
 
-/// Generate live suggestions from the recent transcript.
-///
-/// * `transcript` – recent transcript text (the frontend sends the latest lines)
-/// * `user_context` – optional notes about the user / goal of the call (e.g. "sales call for product X")
-#[tauri::command]
-pub async fn api_live_suggestions<R: Runtime>(
-    app: AppHandle<R>,
-    state: tauri::State<'_, AppState>,
-    transcript: String,
-    user_context: Option<String>,
-) -> Result<LiveSuggestions, String> {
-    let transcript = transcript.trim();
-    if transcript.is_empty() {
-        return Ok(LiveSuggestions::default());
-    }
-
+/// Run one prompt through the model the user picked in Settings.
+async fn run_llm<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &tauri::State<'_, AppState>,
+    system_prompt: &str,
+    user_prompt: &str,
+) -> Result<String, String> {
     let pool = state.db_manager.pool();
     let setting = SettingsRepository::get_model_config(pool)
         .await
@@ -111,15 +108,6 @@ pub async fn api_live_suggestions<R: Runtime>(
         }
     };
 
-    let mut user_prompt = String::new();
-    if let Some(ctx) = user_context.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
-        user_prompt.push_str("About me / goal of this call:\n");
-        user_prompt.push_str(ctx);
-        user_prompt.push_str("\n\n");
-    }
-    user_prompt.push_str("Latest transcript:\n");
-    user_prompt.push_str(tail_chars(transcript, MAX_CONTEXT_CHARS));
-
     let client = reqwest::Client::new();
     let app_data_dir = app.path().app_data_dir().ok();
 
@@ -128,8 +116,8 @@ pub async fn api_live_suggestions<R: Runtime>(
         &provider,
         &setting.model,
         &api_key,
-        SYSTEM_PROMPT,
-        &user_prompt,
+        system_prompt,
+        user_prompt,
         setting.ollama_endpoint.as_deref(),
         custom_endpoint.as_deref(),
         max_tokens,
@@ -139,8 +127,75 @@ pub async fn api_live_suggestions<R: Runtime>(
         None,
     )
     .await?;
+    Ok(completion.content)
+}
 
-    Ok(parse_reply(&completion.content))
+/// Generate live suggestions from the recent transcript.
+///
+/// * `transcript` – recent transcript text (the frontend sends the latest lines)
+/// * `user_context` – optional notes about the user / goal of the call (e.g. "sales call for product X")
+#[tauri::command]
+pub async fn api_live_suggestions<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    transcript: String,
+    user_context: Option<String>,
+) -> Result<LiveSuggestions, String> {
+    let transcript = transcript.trim();
+    if transcript.is_empty() {
+        return Ok(LiveSuggestions::default());
+    }
+
+    let mut user_prompt = String::new();
+    if let Some(ctx) = user_context.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        user_prompt.push_str("About me / goal of this call:\n");
+        user_prompt.push_str(ctx);
+        user_prompt.push_str("\n\n");
+    }
+    user_prompt.push_str("Latest transcript:\n");
+    user_prompt.push_str(tail_chars(transcript, MAX_CONTEXT_CHARS));
+
+    let content = run_llm(&app, &state, SYSTEM_PROMPT, &user_prompt).await?;
+    Ok(parse_reply(&content))
+}
+
+/// Copilot actions copied from Realtime Interview Copilot (see prompts.rs):
+/// * `answer`    – a spoken response to what was just asked
+/// * `summary`   – concise summary of the transcript so far
+/// * `ask`       – free chat with the AI about the call (`question` required)
+#[tauri::command]
+pub async fn api_copilot_generate<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    mode: String,
+    transcript: String,
+    background: Option<String>,
+    question: Option<String>,
+) -> Result<String, String> {
+    let bg = background.as_deref().map(str::trim).filter(|b| !b.is_empty());
+    let conversation = tail_chars(transcript.trim(), MAX_COPILOT_CHARS);
+    let prompt = match mode.as_str() {
+        "answer" => {
+            if conversation.is_empty() {
+                return Err("Nothing has been said yet.".into());
+            }
+            prompts::build_prompt(bg, conversation)
+        }
+        "summary" => {
+            if conversation.is_empty() {
+                return Err("Nothing has been said yet.".into());
+            }
+            prompts::build_summarizer_prompt(conversation)
+        }
+        "ask" => {
+            let q = question.as_deref().map(str::trim).filter(|q| !q.is_empty()).ok_or("Type a question first.")?;
+            prompts::build_ask_ai_prompt(bg, conversation, q)
+        }
+        other => return Err(format!("Unknown copilot mode: {other}")),
+    };
+    // The original app sends the whole prompt as one user message.
+    let content = run_llm(&app, &state, COPILOT_SYSTEM, &prompt).await?;
+    Ok(content.trim().to_string())
 }
 
 #[cfg(test)]

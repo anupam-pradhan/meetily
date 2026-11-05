@@ -1,66 +1,84 @@
 # Call Assistant (built on Meetily)
 
-This is a fork of [Meetily](https://github.com/Zackriya-Solutions/meetily) (MIT) with two features added for live calls. Everything Meetily already did still works: system-wide capture of mic + call audio on Windows, live transcription, and AI summaries.
+A Windows desktop app for live calls in **any** app: Zoom, Teams, Google Meet, WhatsApp, Discord, Slack, and phone dialers.
+It's assembled from open-source projects instead of being written from scratch. `THIRD_PARTY_NOTICES.md` lists them.
 
-## What was added
+| Feature | Copied from | What it does |
+|---|---|---|
+| Real-time voice notetaker | **Meetily** (MIT), the base app | Captures your mic + the call audio, transcribes live, writes AI summaries |
+| Real-time suggestions | **Realtime Interview Copilot** (Apache-2.0) | *Answer now*, *Summarize*, *Ask AI*, plus automatic "say next" tips and key notes |
+| Voice changer | **OpenVoiceChanger** (MIT) | 16 live voice presets (deep, chipmunk, robot, radio, …) + pitch. No delay |
+| Accent changer | **tok.si** (MIT) | You speak; the other person hears an American or British voice saying your words (~1 s delay) |
+| AI voice models (optional) | **w-okada VCClient** (MIT) | Sound like a different person with RVC models (separate download) |
 
-### 1. Live Copilot: real-time suggestions
-A panel on the right of the recording screen. While you record a call, it reads the latest transcript and shows:
+## How the audio flows
 
-- **Say next**: up to 3 short things you could say. Click one to copy it.
-- **Answer**: a direct answer when the other person has just asked a question.
-- **Key notes**: running facts, decisions and action items, with a copy-all button.
+```
+your mic ──► built-in voice engine ──► "CABLE Input" ─┐
+                (effects or accent)                    │  virtual cable
+call app microphone = "CABLE Output" ◄─────────────────┘
+call app speaker    = your headset
+```
+Meetily keeps recording your real mic and the call audio, so notes and suggestions keep working while your voice is changed.
 
-It uses the same AI provider and model you picked in **Settings → Summary model**, whether that's Claude, OpenAI, Groq, OpenRouter, Ollama, a custom endpoint or the built-in model. No extra setup is needed. You can type context for the AI, such as who you are or the goal of the call, into the box at the top of the panel.
+## Using it
 
-- Code: `frontend/src-tauri/src/copilot/mod.rs` (Tauri command `api_live_suggestions`)
-- UI: `frontend/src/components/LiveCopilot/LiveCopilotPanel.tsx`
-- Calls are throttled to one every 8 seconds, and fire right away when a sentence ends with "?".
+1. **Voice & Accent** page (sidebar), first time only:
+   - **Install virtual mic**: installs VB-Audio Virtual Cable. Approve the Windows prompt and restart if asked.
+   - **Download voices**: about 440 MB, needed only for the accent changer.
+2. In your call app, set **Microphone → CABLE Output (VB-Audio Virtual Cable)** and leave the speaker on your headset.
+3. Choose what the other person hears:
+   - **My real voice**: passes your mic through unchanged.
+   - **Voice effects**: pick a preset and adjust the pitch.
+   - **Accent changer**: pick from 8 voices (4 American, 4 British). "Balanced" timing is recommended.
+     **Type to speak** says a typed sentence in the accent voice.
+4. On the main screen, start recording. The **Live Copilot** panel shows tips automatically. Use:
+   - **Answer now** (Ctrl+Enter): a full spoken answer to what was just asked
+   - **Summarize** (Ctrl+Shift+Enter)
+   - **Ask AI**: ask anything about the call
+   The copilot uses the AI model chosen in **Settings → Summary model** (Claude, OpenAI, Groq, Ollama, …).
 
-### 2. Voice Changer
-A new **Voice Changer** page in the sidebar. It drives the open-source [w-okada VCClient](https://github.com/w-okada/voice-changer) (MIT, RVC/Beatrice voice models) as a local engine:
+## Honest limits
 
-- It starts and stops the engine and shows whether it's running.
-- It embeds the engine's control panel, where you pick the voice model, devices and pitch.
-- It walks you through setting up a virtual mic so the changed voice works in Zoom, Teams, Meet, WhatsApp or Discord:
-  `real mic → VCClient → "CABLE Input"` and then `call app mic = "CABLE Output"`. This uses [VB-Audio Virtual Cable](https://vb-audio.com/Cable/).
-
-Code: `frontend/src-tauri/src/voice_changer/mod.rs` and `frontend/src/app/voice-changer/page.tsx`
-
-**Accent changing:** voice models change how you sound, but they keep your accent. No open-source real-time accent converter is good enough yet. The Voice Changer page is set up so a commercial accent SDK can be added later as another engine.
+- **Accent changer:** the other person hears a *different, natural English voice*, not your own voice with a new accent. No open-source model can do "your own voice with a new accent" in real time yet. Expect about 0.6–1.5 s of delay, and Whisper can occasionally mishear a word. Use a headset.
+- **AI voice models** (sounding like a specific person) still need VCClient, a separate ~2 GB download that works best with an NVIDIA GPU.
+- **VB-Audio Virtual Cable** is free for personal use. Check VB-Audio's licence terms before selling the app or using it across a company.
+- **Web version** is not built. Browsers can't create a virtual microphone or capture other apps' audio.
 
 ## Build the Windows installer (no Windows PC needed)
 
-1. Create a new **private** repo on GitHub and push this folder to it:
+1. Push this repo to a **private** GitHub repo:
    ```bash
    git remote set-url origin https://github.com/<you>/<repo>.git
    git push -u origin call-assistant
    ```
-2. On GitHub, go to **Actions → "Build and Test - Windows" → Run workflow** and choose the `call-assistant` branch.
-   Signing is off by default. Turn it on only after you've added your own code-signing secrets.
-3. When the run finishes, download the `.exe` / `.msi` from the run's **Artifacts**.
+2. On GitHub, go to **Actions → "Build and Test - Windows" → Run workflow** and pick the `call-assistant` branch.
+   Signing is off by default. The workflow builds the voice engine with Python and self-tests it, then builds the app installer.
+3. Download the installer from the run's **Artifacts**. Unsigned builds show SmartScreen: click **More info → Run anyway**.
 
-Unsigned installers show a Windows SmartScreen warning. Click **More info → Run anyway**. For public release, buy a code-signing certificate.
+## Develop locally on Windows
 
-## Build locally on Windows
-
-Follow Meetily's own instructions in `README.md` and `docs/`. In short, install Rust, Node 20+, pnpm, Visual Studio Build Tools (C++), LLVM and CMake, then run:
 ```bat
-cd frontend
+cd voice-engine
+build_windows.bat          :: builds dist\voice-engine\voice-engine.exe
+cd ..\frontend
 pnpm install
 pnpm run tauri:dev
 ```
+In development, if `voice-engine.exe` isn't built, the app runs `voice-engine/main.py` with your installed Python instead. Run `pip install -r voice-engine/requirements.txt` first.
 
-## Web version: what's possible
+## Code map
 
-The desktop app is the full product. A browser can't create a virtual microphone or capture other apps' audio, so in a web version:
-- **Works:** notes and live suggestions for calls running in a browser tab, by sharing that tab's audio.
-- **Doesn't work:** the voice changer, or capturing calls from desktop apps like WhatsApp or the Zoom app.
+| Part | Files |
+|---|---|
+| Copilot (Rust) | `frontend/src-tauri/src/copilot/` (`mod.rs`, `prompts.rs`) |
+| Copilot (UI) | `frontend/src/components/LiveCopilot/LiveCopilotPanel.tsx` |
+| Voice engine | `voice-engine/` (`engine.py`, `dsp_effects.py`, `presets.py`, `assets.py`, `server.py`) |
+| Engine launcher (Rust) | `frontend/src-tauri/src/voice_engine/mod.rs`. It starts the engine with a random token on a free localhost port and stops it on exit |
+| Voice & Accent page | `frontend/src/app/voice-changer/page.tsx` |
+| VCClient add-on | `frontend/src-tauri/src/voice_changer/`, `frontend/src/components/VoiceChanger/VcClientPanel.tsx` |
 
-The web version needs its own small cloud backend for speech-to-text and the AI. Treat it as a separate next phase.
-
-## Rules before shipping
-- **Recording consent:** tell people on the call when you're recording. The laws differ by country.
-- **Voices:** only use your own voice or voice models you have rights to. Don't impersonate real people.
-- **License:** keep the MIT license notices from Meetily and VCClient. VCClient's voice *models* each have their own terms.
-- **Name:** rename the app before release by changing `productName` and `identifier` in `frontend/src-tauri/tauri.conf.json`, and the icons in `frontend/src-tauri/icons/`.
+## Before you release
+- Rename the app: `productName` and `identifier` in `frontend/src-tauri/tauri.conf.json`, plus the icons.
+- Keep `THIRD_PARTY_NOTICES.md` and `voice-engine/THIRD_PARTY_NOTICES.md` in the app.
+- Tell people on the call when you're recording. Don't use voice or accent changing to impersonate anyone or deceive people.

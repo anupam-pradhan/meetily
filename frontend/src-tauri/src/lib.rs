@@ -55,6 +55,7 @@ pub mod summary;
 pub mod tray;
 pub mod utils;
 pub mod voice_changer;
+pub mod voice_engine;
 pub mod whisper_engine;
 
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
@@ -744,9 +745,13 @@ pub fn run() {
             // Summary commands
             summary::commands::api_process_transcript,
             copilot::api_live_suggestions,
-            voice_changer::voice_engine_status,
-            voice_changer::voice_engine_start,
-            voice_changer::voice_engine_stop,
+            copilot::api_copilot_generate,
+            voice_changer::vcclient_status,
+            voice_changer::vcclient_start,
+            voice_changer::vcclient_stop,
+            voice_engine::voice_engine_ensure,
+            voice_engine::voice_engine_request,
+            voice_engine::voice_engine_stop,
             summary::commands::api_get_summary,
             summary::commands::api_save_meeting_summary,
             summary::commands::api_get_meeting_summary_language,
@@ -859,6 +864,9 @@ pub fn run() {
                         } else {
                             log::warn!("AppState not available for database cleanup (likely first launch)");
                         }
+
+                        // Stop the built-in voice engine (releases the mic and CABLE Input)
+                        voice_engine::shutdown_engine();
 
                         // Clean up sidecar
                         log::info!("Cleaning up sidecar...");

@@ -535,7 +535,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Voice Changer</p>
+              <p>Voice &amp; Accent</p>
             </TooltipContent>
           </Tooltip>
 
@@ -822,7 +822,7 @@ const Sidebar: React.FC = () => {
               className="w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
             >
               <AudioLines className="w-4 h-4 mr-2" />
-              <span>Voice Changer</span>
+              <span>Voice &amp; Accent</span>
             </button>
             <button
               onClick={() => router.push('/settings')}

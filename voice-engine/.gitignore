@@ -1,0 +1,7 @@
+build/
+dist/*
+!dist/voice-engine/
+dist/voice-engine/*
+!dist/voice-engine/README.txt
+__pycache__/
+*.spec

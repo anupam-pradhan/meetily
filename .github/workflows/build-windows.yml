@@ -683,6 +683,29 @@ jobs:
           Write-Host "Copied llama-helper to frontend/src-tauri/binaries/"
           Get-ChildItem "frontend/src-tauri/binaries/"
 
+      - name: Setup Python for voice engine
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build voice engine (voice effects + accent changer)
+        shell: pwsh
+        run: |
+          # Bundled engine built from tok.si (MIT) and OpenVoiceChanger (MIT); see voice-engine/THIRD_PARTY_NOTICES.md
+          cd voice-engine
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+          python -m PyInstaller --noconfirm --clean --console --onedir --name voice-engine `
+            --exclude-module pkg_resources --exclude-module setuptools `
+            --collect-all sherpa_onnx --collect-all sounddevice --collect-submodules scipy.signal `
+            main.py
+          if ($LASTEXITCODE -ne 0) { Write-Error "voice engine build failed"; exit $LASTEXITCODE }
+          Copy-Item THIRD_PARTY_NOTICES.md dist/voice-engine/
+          # Smoke test: all bundled libraries (speech, voices, audio) must load
+          & "dist/voice-engine/voice-engine.exe" --self-test
+          if ($LASTEXITCODE -ne 0) { Write-Error "voice engine self-test failed"; exit 1 }
+          Get-ChildItem dist/voice-engine | Select-Object -First 15
+
       - name: Cache FFmpeg binary
         uses: actions/cache@v4
         with:

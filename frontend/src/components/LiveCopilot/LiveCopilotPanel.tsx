@@ -9,11 +9,16 @@
  *  - what to say next
  *  - a direct answer if a question was just asked
  *  - running key notes / action items
+ *
+ * On-demand actions (Answer now, Summarize, Ask AI) and their shortcuts are
+ * ported from Realtime Interview Copilot (Apache-2.0,
+ * https://github.com/innovatorved/realtime-interview-copilot). Prompts live in
+ * src-tauri/src/copilot/prompts.rs.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Copy, Lightbulb, MessageCircleQuestion, NotebookPen, Pause, Play, RefreshCw } from 'lucide-react';
+import { Copy, FileText, Lightbulb, Loader2, MessageCircleQuestion, MessagesSquare, NotebookPen, Pause, Play, RefreshCw, Send, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -60,6 +65,11 @@ export function LiveCopilotPanel() {
   const [notes, setNotes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // On-demand copilot (ported from Realtime Interview Copilot)
+  const [onDemand, setOnDemand] = useState<{ kind: 'answer' | 'summary' | 'ask'; text: string } | null>(null);
+  const [onDemandLoading, setOnDemandLoading] = useState<'answer' | 'summary' | 'ask' | null>(null);
+  const [askText, setAskText] = useState('');
 
   const lastSentCount = useRef(0);
   const lastCallAt = useRef(0);
@@ -135,6 +145,51 @@ export function LiveCopilotPanel() {
     return () => clearTimeout(timer);
   }, [transcripts, enabled, isRecording, isPaused, fetchSuggestions]);
 
+  const fullTranscript = useCallback(
+    () =>
+      transcripts
+        .filter((t) => !t.is_partial)
+        .map((t) => t.text.trim())
+        .filter(Boolean)
+        .join('\n'),
+    [transcripts]
+  );
+
+  const runCopilot = useCallback(
+    async (kind: 'answer' | 'summary' | 'ask', question?: string) => {
+      if (onDemandLoading) return;
+      setOnDemandLoading(kind);
+      try {
+        const text = await invoke<string>('api_copilot_generate', {
+          mode: kind,
+          transcript: fullTranscript(),
+          background: userContext || null,
+          question: question ?? null,
+        });
+        setOnDemand({ kind, text });
+        if (kind === 'ask') setAskText('');
+      } catch (e) {
+        toast.error(typeof e === 'string' ? e : String(e));
+      } finally {
+        setOnDemandLoading(null);
+      }
+    },
+    [fullTranscript, userContext, onDemandLoading]
+  );
+
+  // Same shortcuts as the original app: Ctrl/Cmd+Enter = answer, Ctrl/Cmd+Shift+Enter = summarize
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.dataset?.copilotAsk === 'true') return; // Ask box handles its own Enter
+      e.preventDefault();
+      runCopilot(e.shiftKey ? 'summary' : 'answer');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [runCopilot]);
+
   const copy = (text: string) => {
     navigator.clipboard.writeText(text).then(
       () => toast.success('Copied'),
@@ -182,7 +237,50 @@ export function LiveCopilotPanel() {
         />
       </div>
 
+      <div className="px-4 pt-3 flex gap-2">
+        <Button
+          size="sm"
+          className="flex-1"
+          onClick={() => runCopilot('answer')}
+          disabled={!!onDemandLoading || transcripts.length === 0}
+          title="Write a full spoken answer to what was just said (Ctrl+Enter)"
+        >
+          {onDemandLoading === 'answer' ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Zap className="h-3.5 w-3.5 mr-1" />}
+          Answer now
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          onClick={() => runCopilot('summary')}
+          disabled={!!onDemandLoading || transcripts.length === 0}
+          title="Summarize the call so far (Ctrl+Shift+Enter)"
+        >
+          {onDemandLoading === 'summary' ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <FileText className="h-3.5 w-3.5 mr-1" />}
+          Summarize
+        </Button>
+      </div>
+
       <div className="p-4 space-y-5 text-sm">
+        {onDemand && (
+          <section>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                {onDemand.kind === 'answer' ? 'Your answer' : onDemand.kind === 'summary' ? 'Summary so far' : 'AI reply'}
+              </h3>
+              <div className="flex">
+                <Button variant="ghost" size="sm" onClick={() => copy(onDemand.text)} title="Copy">
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setOnDemand(null)} title="Close">
+                  ×
+                </Button>
+              </div>
+            </div>
+            <div className="rounded-lg bg-white border border-blue-200 p-3 whitespace-pre-wrap leading-relaxed">{onDemand.text}</div>
+          </section>
+        )}
+
         {!isRecording && !result && (
           <p className="text-gray-500 text-xs">
             Start recording a call. Suggestions, answers and key notes will appear here as people talk.
@@ -245,6 +343,30 @@ export function LiveCopilotPanel() {
             </ul>
           </section>
         )}
+      </div>
+
+      <div className="mt-auto sticky bottom-0 bg-gray-50 border-t border-gray-200 p-3">
+        <div className="text-[11px] font-medium text-gray-500 mb-1 flex items-center gap-1">
+          <MessagesSquare className="h-3 w-3" /> Ask AI about this call
+        </div>
+        <div className="flex gap-2">
+          <Textarea
+            data-copilot-ask="true"
+            className="min-h-[38px] text-xs bg-white"
+            placeholder="e.g. What price did they mention? (Enter to send)"
+            value={askText}
+            onChange={(e) => setAskText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (askText.trim()) runCopilot('ask', askText.trim());
+              }
+            }}
+          />
+          <Button size="sm" onClick={() => runCopilot('ask', askText.trim())} disabled={!askText.trim() || !!onDemandLoading}>
+            {onDemandLoading === 'ask' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+          </Button>
+        </div>
       </div>
     </aside>
   );

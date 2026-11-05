@@ -14,7 +14,7 @@ use std::time::Duration;
 static ENGINE: Mutex<Option<std::process::Child>> = Mutex::new(None);
 
 #[derive(Debug, Serialize)]
-pub struct VoiceEngineStatus {
+pub struct VcClientStatus {
     pub reachable: bool,
     pub launched_by_app: bool,
     pub url: String,
@@ -36,7 +36,7 @@ fn is_local(url: &str) -> bool {
 
 /// Check whether the VCClient engine is running and reachable.
 #[tauri::command]
-pub async fn voice_engine_status(url: Option<String>) -> Result<VoiceEngineStatus, String> {
+pub async fn vcclient_status(url: Option<String>) -> Result<VcClientStatus, String> {
     let url = normalise_url(url);
     if !is_local(&url) {
         return Err("The voice engine must run on this computer (127.0.0.1 or localhost).".into());
@@ -63,13 +63,13 @@ pub async fn voice_engine_status(url: Option<String>) -> Result<VoiceEngineStatu
         }
     };
 
-    Ok(VoiceEngineStatus { reachable, launched_by_app, url })
+    Ok(VcClientStatus { reachable, launched_by_app, url })
 }
 
 /// Launch VCClient from the path the user selected (e.g. C:\\vcclient\\start_http.bat
 /// or the bundled .exe).
 #[tauri::command]
-pub async fn voice_engine_start(path: String) -> Result<(), String> {
+pub async fn vcclient_start(path: String) -> Result<(), String> {
     let path = PathBuf::from(path.trim());
     if !path.is_file() {
         return Err(format!("File not found: {}", path.display()));
@@ -108,7 +108,7 @@ pub async fn voice_engine_start(path: String) -> Result<(), String> {
 
 /// Stop the engine if this app launched it.
 #[tauri::command]
-pub async fn voice_engine_stop() -> Result<(), String> {
+pub async fn vcclient_stop() -> Result<(), String> {
     let mut guard = ENGINE.lock().map_err(|_| "engine lock poisoned")?;
     if let Some(mut child) = guard.take() {
         let _ = child.kill();
