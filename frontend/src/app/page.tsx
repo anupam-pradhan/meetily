@@ -11,6 +11,7 @@ import { StatusOverlays } from '@/app/_components/StatusOverlays';
 import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
 import { TranscriptPanel } from './_components/TranscriptPanel';
+import { LiveCopilotPanel } from '@/components/LiveCopilot/LiveCopilotPanel';
 import { useModalState } from '@/hooks/useModalState';
 import { useRecordingStateSync } from '@/hooks/useRecordingStateSync';
 import { useRecordingStart } from '@/hooks/useRecordingStart';
@@ -212,6 +213,9 @@ export default function Home() {
           isStopping={isStopping}
           showModal={showModal}
         />
+
+        {/* Live AI copilot: real-time suggestions, answers and notes */}
+        <LiveCopilotPanel />
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
         {(hasMicrophone || isRecording) &&
